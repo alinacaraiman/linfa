@@ -4,7 +4,7 @@ use linfa::{
     Dataset, Float, Label,
 };
 use linfa_trees::{DecisionTree, DecisionTreeParams};
-use ndarray::{Array, ArrayBase, Axis, Data, Ix2};
+use ndarray::{Array, ArrayBase, Axis, Data, Ix2, Array0, Array1};
 use ndarray_rand::{rand_distr::Uniform, RandomExt};
 
 use crate::RandomForestParams;
@@ -102,26 +102,50 @@ impl<F: Float, L: Label, D: Data<Elem = F>, T: AsSingleTargets<Elem = L> + Label
 //     }
 // }
 
-impl<F: Float, L: Label> RandomForest<F, L> {
-    pub fn feature_importances(&self) -> Vec<(usize, usize)> {
-        let mut importances: Vec<(usize, usize)> = Vec::new();
-        for st in &self.trees {
+impl<F: Float, L: Label> RandomForest<F, L> 
+where f64: PartialEq<F>{
+    pub fn feature_importances(&self, n_features: usize) -> Vec<F> {
+        let mut importances: Array1<F> = Array1::zeros(n_features);
+        for tree in &self.trees {
             // features in the single tree
-            let st_feats = st.features();
-            for f in st_feats.iter() {
-                let mut existing = false;
-                for imp in importances.iter_mut() {
-                    if &imp.0 == f {
-                        imp.1 += 1;
-                        existing = true;
-                    }
-                }
-                if !existing {
-                    importances.push((*f, 0));
-                }
+           let tree_importance = tree.feature_importance();
+            for i in 0..n_features {
+                importances[i] += tree_importance[i];
             }
         }
 
-        importances
+        let mut sorted_imp = importances.to_vec();
+        sorted_imp.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        importances.iter().map(|&x| x / importances.sum()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use linfa::{traits::Fit, Dataset};
+    use linfa_trees::DecisionTreeParams;
+    use ndarray::{Array, Array2};
+    use ndarray_rand::rand::{rngs::StdRng, SeedableRng, Rng};
+
+    use crate::RandomForest;
+
+    #[test]
+    fn test_feat_importance() {
+        // Generate a random dataset with 10 features and 100 data points    
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut features = Array2::zeros((10, 100));
+        for i in 0..10 {
+            for j in 0..100 {
+                println!("i:{i}, j:{j}");
+                features[[i, j]] = rng.gen_range(0.1..1.0);
+            }
+        }
+        let target = Array::from((0..100).map(|_| rng.gen_range(0..2)).collect::<Vec<usize>>());
+        let dt_params = DecisionTreeParams::<f64, usize>::new().max_depth(Some(3));
+        let rf_params = RandomForest::params(100, dt_params, true, None);
+        let rf = rf_params.fit(&Dataset::new(features, target)).unwrap();
+
+        let fi = rf.feature_importances(10);
+        assert_eq!(fi.iter().fold(0., |acc, x| acc + x) +- 2e-10 , 1.0 +- 2e-10);
     }
 }
