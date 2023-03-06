@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
 use linfa::{
     dataset::{AsSingleTargets, Labels},
-    traits::{Fit, PredictInplace, Predict},
+    traits::Fit,
     Dataset, Float, Label,
 };
 use linfa_trees::{DecisionTree, DecisionTreeParams};
-use ndarray::{Array, ArrayBase, Axis, Data, Ix2, Array1, Array2};
+use ndarray::{Array, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::{rand_distr::Uniform, RandomExt};
 
 use crate::RandomForestParams;
@@ -105,19 +103,25 @@ impl<F: Float, L: Label, D: Data<Elem = F>, T: AsSingleTargets<Elem = L> + Label
 // }
 
 impl<F: Float, L: Label> RandomForest<F, L> {
-    pub fn feature_importances(&self) -> Vec<usize> {
-        let mut importances: HashMap<usize, usize> = HashMap::new();
+    pub fn feature_importances(&self) -> Vec<(usize, usize)> {
+        let mut importances: Vec<(usize, usize)> = Vec::new();
         for st in &self.trees {
             // features in the single tree
             let st_feats = st.features();
             for f in st_feats.iter() {
-                *importances.entry(*f).or_insert(0) += 1
+                let mut existing = false;
+                for imp in importances.iter_mut() {
+                    if &imp.0 == f {
+                        imp.1 += 1;
+                        existing = true;
+                    }
+                }
+                if !existing {
+                    importances.push((*f, 0));
+                }
             }
         }
 
-        let mut top_feats: Vec<_> = importances.into_iter().collect();
-        top_feats.sort_by(|a, b| b.1.cmp(&a.1));
-
-        top_feats.iter().map(|(a, _)| *a).collect()
+        importances
     }
 }
